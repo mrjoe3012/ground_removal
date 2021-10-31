@@ -1,0 +1,1 @@
+# Ground Removal Test
