@@ -14,7 +14,7 @@ then to build, run
 bash build.bash
 ```
 <br>
-Run the executable with\n
+Run the executable with<br><br>
 ```bash
 bash run.bash
 ```
