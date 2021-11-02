@@ -5,17 +5,16 @@ Make sure you have cmake and libpcl installed.
 ```bash
 sudo apt install cmake libpcl-dev
 ```
-<br>
 Navigate into the root directory and run
-
+```bash
 cmake -S ./ -B build/
-
-then, run
-
+```
+then to build, run
+```bash
 bash build.bash
-
-run with
-
-build/grt
+```
+<br>
+Run the executable with
+```bash build/grt```
 or
-bash run.bash
+```bash bash run.bash```
