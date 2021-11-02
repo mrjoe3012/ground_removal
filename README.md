@@ -2,9 +2,10 @@
 
 Make sure you have cmake and libpcl installed.
 
-sudo apt install cmake
-sudo apt install libpcl-dev
-
+```bash
+sudo apt install cmake libpcl-dev
+```
+<br>
 Navigate into the root directory and run
 
 cmake -S ./ -B build/
