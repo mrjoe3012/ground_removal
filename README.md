@@ -15,11 +15,3 @@ bash build.bash
 ```
 <br>
 Run the executable with
-<br>
-```bash
-build/grt
-```
-or
-```bash
-bash run.bash
-```
