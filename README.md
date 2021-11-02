@@ -15,3 +15,6 @@ bash build.bash
 ```
 <br>
 Run the executable with
+```bash
+bash run.bash
+```
