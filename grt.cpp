@@ -1,246 +1,379 @@
 #include <iostream>
-#include <pcl/point_cloud.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/visualization/cloud_viewer.h>
+#include <cmath>
 #include <vector>
 #include <memory>
 #include <cstdlib>
 #include <algorithm>
-#include <chrono>	
+#include <chrono>
 #include <thread>
 
-// 2d array where each element is a list of points.
-template<typename PointT>
-using BinArray = std::vector< std::vector< std::vector< PointT* > > >;
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_cloud.h>
+#include <pcl/visualization/cloud_viewer.h>
+#include <pcl/visualization/pcl_visualizer.h>
 
-// Expects only pcl point types e.g. PointXYZ, PointXYZRGB...
-// Returns a bin assignment for each point as a vector containing elements of the form: ( (indexSegment, indexBin), PointT* )
-// Experimental implementation, assumes a circular FOV of radius 2pi. Will result in many empty bins.
-template<typename PointT>
-std::unique_ptr< BinArray<PointT>  > assignBins(pcl::PointCloud<PointT>& pc, float viewDistance,
-		unsigned int numBins, unsigned int numSegments)
+// essential data structures
+
+// start of vector definitions
+
+struct Vector2
 {
-	const float pi = 4.0f*std::atan(1);
-	std::unique_ptr<BinArray<PointT>> binArray(new BinArray<PointT>(numSegments, std::vector<std::vector<PointT*>>(numBins)));
+	Vector2() : Vector2(0,0) {};
+	Vector2(float x, float y) : x(x),y(y) {};
+	Vector2(const Vector2& rhs) : x(rhs.x),y(rhs.y) {};
 
-	float segmentAngleStep = 2.0f*pi / numSegments;
-	float binRadiusStep = viewDistance / numBins;
+	friend Vector2 operator+(const Vector2& lhs, const Vector2& rhs);
+	friend Vector2 operator-(const Vector2& lhs, const Vector2& rhs);
+	friend Vector2 operator*(const Vector2& rhs, const float& lhs);
+	friend Vector2 operator*(const float& rhs, const Vector2& lhs);
+	friend Vector2 operator/(const Vector2& lhs, const float& rhs);
+	friend bool operator==(const Vector2& lhs, const Vector2& rhs);
 
-	size_t i = 0;
+	// convert a 3d point to a 2d point based on its distance
+	// from the centre of the 3d space and its height
+	template<typename PointT>
+	static Vector2 fromPclPoint(const PointT& p) { return Vector2(std::sqrt(std::pow(p.x,2) + std::pow(p.y,2)), p.z); };
 
-	for(PointT& p : pc)
+	float sqrMagnitude() const { return std::pow(x,2) + std::pow(y,2); };
+	float magnitude() const { return std::sqrt(sqrMagnitude()); };
+
+	float x, y;
+};
+
+Vector2 operator+(const Vector2& lhs, const Vector2& rhs)
+{
+	return Vector2(lhs.x+rhs.x, lhs.y+rhs.y);
+}
+
+Vector2 operator-(const Vector2& lhs, const Vector2& rhs)
+{
+	return lhs + (-1*rhs);
+}
+
+Vector2 operator*(const Vector2& lhs, const float& rhs)
+{
+	return Vector2(lhs.x*rhs,lhs.y*rhs);
+}
+
+Vector2 operator*(const float& lhs, const Vector2& rhs)
+{
+	return operator*(rhs, lhs);
+}
+
+Vector2 operator/(const Vector2& lhs, const float& rhs)
+{
+	return (1.0f/rhs) * lhs;
+}
+
+bool operator==(const Vector2& lhs, const Vector2& rhs)
+{
+	return lhs.x==rhs.x && lhs.y==rhs.y;
+}
+
+// end of vector definitions
+
+// start of line definitions
+
+struct Line
+{
+	Line(float gradient, float yIntercept, Vector2 beginPoint, Vector2 endPoint) : gradient(gradient), yIntercept(yIntercept), beginPoint(beginPoint), endPoint(endPoint) {};
+	Line(const Line& rhs) : Line(rhs.gradient, rhs.yIntercept, rhs.beginPoint, rhs.endPoint) {};
+
+	float gradient, yIntercept;
+	Vector2 beginPoint, endPoint;
+};
+
+// end of line definitions
+
+// typedefs
+
+// represents an array of pcl::Pointx pointers, used to represents points within a bin (within a segment)
+template<typename PointT>
+using PointArray = std::vector<const PointT*>;
+
+// represents an array of bins, belonging to a specific segment
+template<typename PointT>
+using BinArray = std::vector< PointArray<PointT> >;
+
+// the data structure we will be using to store point->(segment[bin]) assignments.
+template<typename PointT>
+using SegmentArray = std::vector< BinArray<PointT> >; 
+
+// (smart) pointer to a point cloud
+template<typename PointT>
+using PCPtr = typename pcl::PointCloud<PointT>::Ptr;
+
+// end of typedefs
+
+// Currently always divides an FOV of 360degrees. This means that FOVs which are not 360degrees or 180degrees will have
+// uneven segment assignments. Although given the use-case for the algorithm, it's unlikely that we would ever work with
+// an FOV that is not 180degrees. Additionally, converting this function to work with any FOV should be relatively
+// trivial.
+// Note that we are templating this function (as well as many others) so that they work with a variety of pcl::Point data
+// types e.g. pcl::PointXYZ, pcl::PointXYZRGB, ...
+template<typename PointT>
+std::unique_ptr< SegmentArray< PointT > > assignPointsToBinsAndSegments(const pcl::PointCloud<PointT>& cloud, int numberOfSegments, int numberOfBins)
+{
+	const float pi = 4*std::atan(1);
+
+	// construct the result so that it already contains the correct number of arrays for segments and bins
+	std::unique_ptr< SegmentArray< PointT > > pSegmentArray(new SegmentArray<PointT>(numberOfSegments, BinArray<PointT>(numberOfBins)));	
+
+	// figure out how far away the farthest point is
+	// so that we can determine how big each bin should
+	// be.
+	// Note that using the distance squared is acceptable here
+	const PointT& farthestPoint = *std::max_element(cloud.begin(), cloud.end(), [](const PointT& p1, const PointT& p2){ return std::pow(p1.x, 2) + std::pow(p1.y, 2) < std::pow(p2.x, 2) + std::pow(p2.y, 2); });
+	float farthestPointDistance = std::sqrt(std::pow(farthestPoint.x,2)+std::pow(farthestPoint.y,2));
+
+	// distance between edge of each bin
+	float binRange = farthestPointDistance / numberOfBins;
+	// angle between each segment edge
+	float segmentAngle = (2.0f*pi) / numberOfSegments;
+
+	for(const PointT& point : cloud)
 	{
-		float x = p.x;
-		float y = p.y;
-		float angleWithPositiveXAxis = std::atan2(y,x);
-		if (angleWithPositiveXAxis < 0)
-			angleWithPositiveXAxis = 2*pi + angleWithPositiveXAxis;
+		float pointDistance = std::sqrt(std::pow(point.x,2)+std::pow(point.y,2));
+		float pointAngleWithXAxis = std::atan2(point.y, point.x);
+		if(pointAngleWithXAxis < 0)
+			pointAngleWithXAxis = 2.0f*pi + pointAngleWithXAxis;
 
-		unsigned int segmentIndex = (unsigned int)(angleWithPositiveXAxis / segmentAngleStep);
-		float distance = std::sqrt(x*x+y*y);
+		
+		unsigned int segmentIndex = static_cast<unsigned int>(pointAngleWithXAxis/segmentAngle);
+		unsigned int binIndex = std::min(static_cast<unsigned int>(pointDistance/binRange), static_cast<unsigned int>(numberOfBins-1));
 
-		unsigned int binIndex = std::min((unsigned int)(distance/binRadiusStep), numBins-1);		
-		(*binArray)[segmentIndex][binIndex].push_back(&p);
+		// assign the bin according to its index
+		(*pSegmentArray)[segmentIndex][binIndex].push_back(&point);
 	}
 
-	return binArray;
-	
-}	
 
-typedef std::pair<float, float> Point2D;
+	return pSegmentArray;
 
-template<typename PointT>
-Point2D getPrototype(std::vector<PointT*>& bin)
-{
-	PointT* p3d = *std::min_element(bin.begin(), bin.end(), [](PointT* p1, PointT* p2){ return p1->z < p2->z; });
-	Point2D p2d = std::make_pair(std::sqrt(p3d->x*p3d->x+p3d->y*p3d->y), p3d->z);
-	return p2d;
 }
 
-typedef std::pair<float, float> Line2D;
-
-// Line of best fit using the 2D point information.
-// least squares method, yoinked from https://web.archive.org/web/20150715022401/http://faculty.cs.niu.edu/~hutchins/csci230/best-fit.htm
-// first=m, second=c
-Line2D fitLine2D(std::vector< Point2D >& xyValues)
+// fits a line through an array of 2d points
+// least squares method from https://web.archive.org/web/20150715022401/http://faculty.cs.niu.edu/~hutchins/csci230/best-fit.htm
+Line fitLine2D(const std::vector<Vector2>& points)
 {
-	float sumX = 0.0f;
-	float sumY = 0.0f;
-	float sumXX = 0.0f;
-	float sumXY = 0.0f;
+	float sumX = 0.0f, sumY = 0.0f, sumXX = 0.0f, sumXY = 0.0f;
 
-	for(std::pair<float, float> point : xyValues)
+	for(const Vector2& point : points)
 	{
-		sumX += point.first;
-		sumY += point.second;
-		sumXX += point.first*point.first;
-		sumXY += point.first*point.second;
+		sumX += point.x;
+		sumY += point.y;
+		sumXX += point.x*point.x;
+		sumXY += point.x*point.y;
 	}
 
-	float count = (float)xyValues.size();
-	float xMean = sumX / count;
-	float yMean = sumY / count;
-	float slope = (sumXY - sumX * yMean) / (sumXX - sumX*xMean);
-	float c = yMean - slope*xMean;
+	float count = points.size();
+	float xMean = sumX/count, yMean = sumY/count;
+	float slope = (sumXY - sumX*yMean) / (sumXX - sumX*xMean);
+	float yIntercept = yMean - slope*xMean;
 
-	return std::make_pair(slope, c);
+	return Line(slope, yIntercept, points.front(), points.back());
 }
 
-float distancePointToLine(Point2D point, Line2D line)
+// returns the minimum distance between a (2d) point and a (2d) line.
+float distanceFromPointToLine(const Vector2& point, const Line& line)
 {
-	float x1 = point.first, x2 = point.first;
-	float y1 = point.second, y2 = x2*line.first+line.second;
-	return std::sqrt(std::pow(x1-x2,2)+std::pow(y1-y2,2));
+	Vector2 v1(point.x, point.y);
+	Vector2 v2(point.x, point.x*line.gradient + line.yIntercept);
+	return (v1-v2).magnitude();
 }
 
-float getFitRMSE(const Line2D& l, const std::vector<Point2D>& points)
+// returns the root mean square error of a fit
+// https://en.wikipedia.org/wiki/Root-mean-square_deviation
+float fitRMSE(const Line& line, const std::vector<Vector2>& points)
 {
+
 	float sum = 0;
 	float count = points.size();
-	for(const Point2D& p : points)
+	
+	for(const Vector2& point : points)
 	{
-		float x = p.first;
-		float y1 = l.first*x + l.second;
-		float y2 = p.second;
-		sum += std::pow(y1-y2, 2)/count;
+		float x = point.x;
+		float y = point.y;
+		float yExpected = line.gradient*x + line.yIntercept;
+		sum += std::pow(yExpected-y, 2);
 	}
-	float error = std::sqrt(sum);
-	return error;
+
+	return std::sqrt(sum/count);
+
 }
 
-// Gets ground plane lines in a segment.
+// Gets the prototype point, which is the point with lowest
+// z value
 template<typename PointT>
-std::vector<Line2D> getGroundPlaneLines(std::vector<std::vector<PointT*>>& array)
+Vector2 prototypePoint(const PointArray<PointT>& pointArray)
 {
-	float tSmall = -100.0f, tMax = 100.0f;
-	float tYInt = 100.0f;
-	float maxPointDistanceToLine = 100.0f;
-	float tRMSE = 0.06f;
+	const PointT* pPoint = *std::min_element(pointArray.begin(), pointArray.end(), [](const PointT* lhs, const PointT* rhs){ return lhs->z < rhs->z; });
+	// convert 3d point into 2d point
+	Vector2 point2d = Vector2::fromPclPoint(*pPoint);
+	return point2d;
+}
 
-	std::vector<Line2D> lines;
-	std::vector<Point2D> linePoints;
+// returns a series of ground plane line approximations for a specific segment
+// (algorithm 1 in "Fast Segmentation of 3D Point Clouds for Gound Vehicles" pg.562)
+template<typename PointT>
+std::vector<Line> groundPlaneLinesForSegment(const BinArray<PointT>& binArray)
+{
+	const float tM = 2.0f, tMSmall = -3.0f;
+	const float tB = 1.0f;
+	const float tRMSE = 0.005f;
+	const float tDPrev = 1.0f;
 
-	for(size_t i = 0, c = 0; i < array.size(); i++)
+	// points which are incrementally populated and
+	// are ultimately used to fit ground plane lines
+	std::vector<Vector2> linePoints;
+	// the ground plane lines
+	std::vector<Line> lines;
+
+	unsigned int numberOfBins = binArray.size();
+
+	for(unsigned int i = 0, c = 0; i < numberOfBins; i++)
 	{
-		std::vector<PointT*>& bin = array[i];
-		if(bin.size() != 0)
+		const std::vector<const PointT*>& pointArray = binArray[i];
+
+		if(pointArray.size() > 0)
 		{
-			Point2D prototypePoint = getPrototype(bin);
+			Vector2 prototype = prototypePoint(pointArray);
 			if(linePoints.size() >= 2)
 			{
-				linePoints.push_back(prototypePoint);
-				Line2D l = fitLine2D(linePoints);
-				if (!( std::abs(l.first) < tMax && (l.first > tSmall || std::abs(l.second) <= tYInt) && getFitRMSE(l, linePoints) < tRMSE))
+				linePoints.push_back(prototype);
+				Line line = fitLine2D(linePoints);
+				std::cout << line.gradient << ", " << line.yIntercept << ", " <<  fitRMSE(line, linePoints) << std::endl;
+				if(!(std::abs(line.gradient) <= tM && (line.gradient > tMSmall || std::abs(line.yIntercept) <= tB) && fitRMSE(line, linePoints) <= tRMSE))
 				{
 					linePoints.pop_back();
-					l = fitLine2D(linePoints);
-					lines.push_back(l);
-					linePoints = {};
+					line = fitLine2D(linePoints);
+					lines.push_back(line);
+					linePoints.clear();
 					c++;
 					i--;
 				}
+
 			}
 			else
 			{
-				if(c == 0 || linePoints.size() == 0 || distancePointToLine(prototypePoint, lines[c-1]) <= maxPointDistanceToLine)
+				if(linePoints.size() != 0 || c == 0 || distanceFromPointToLine(prototype, lines[c-1]) <= tDPrev)
 				{
-					linePoints.push_back(prototypePoint);
+					linePoints.push_back(prototype);
 				}
 			}
 		}
+
 	}
-	std::cout << std::endl;
+
+	std::cout << lines.size() << " ground plane lines" << std::endl;
+
 	return lines;
+
+}
+
+// returns a new point cloud with (hopefully) less ground points
+// TODO create a structure for the parameter set and allow it to be customised
+// per-call, rather than hard-coded as constants.
+template<typename PointT>
+typename pcl::PointCloud<PointT>::Ptr groundRemoval(const SegmentArray<PointT>& segmentArray)
+{
+
+	const float tDGround = 0.175f;
+
+	float numberOfSegments = segmentArray.size();
+
+	typename pcl::PointCloud<PointT>::Ptr result(new pcl::PointCloud<PointT>);
+
+	unsigned int segmentIndex = 0;
+
+	for(const BinArray<PointT>& binArray : segmentArray)
+	{
+		std::vector<Line> groundPlaneLines = groundPlaneLinesForSegment(binArray);
+		for(const PointArray<PointT>& pointArray : binArray)
+		{
+			for(const PointT* point : pointArray)
+			{
+				Vector2 point2d = Vector2::fromPclPoint(*point);
+				bool groundPoint = false;
+				for (const Line& line : groundPlaneLines)
+				{
+					float distanceToStart = (line.beginPoint - point2d).magnitude();
+					float distanceToEnd = (line.endPoint - point2d).magnitude();
+					if(distanceToStart <= tDGround || distanceToEnd <= tDGround)
+					{
+						groundPoint = true;
+						break;
+					}
+				}
+				if(!groundPoint)
+					result->push_back(*point);
+					
+			}
+		}
+
+		segmentIndex++;
+
+	}	
+
+	return result;
 
 }
 
 int main()
 {
-	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-	if (pcl::io::loadPCDFile<pcl::PointXYZRGB>("sample_data/cloud1.pcd", *cloud) == -1)
+	std::srand(std::time(0));
+
+	// get point cloud from .pcd file
+
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud1(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+	if(pcl::io::loadPCDFile<pcl::PointXYZRGB>("sample_data/cloud1.pcd", *cloud1) == -1)
 	{
-		PCL_ERROR("Couldn't read sample data.\n");
+		PCL_ERROR("Couldn't read sample data.");
 		return -1;
 	}
 
-	// find the furthest point from the sensor
-	auto farthestPoint =  *std::max_element(cloud->begin(), cloud->end(), [](auto p1, auto p2){return p1.x*p1.x+p1.y*p1.y+p1.z*p1.z < p2.x*p2.x+p2.y*p2.y+p2.z*p2.z;});
-	float viewDistance = std::sqrt(farthestPoint.x*farthestPoint.x+farthestPoint.y*farthestPoint.y+farthestPoint.z*farthestPoint.z);
+	unsigned int numSegments = 6, numBins = 128;
 
-	std::cout << "Furthest point: " << viewDistance << std::endl;
+	std::unique_ptr<SegmentArray<pcl::PointXYZRGB>> pSegmentArray = assignPointsToBinsAndSegments(*cloud1, numSegments, numBins);
 
-	const unsigned int numBins = 32, numSegments = 32;
 
-	std::unique_ptr<BinArray<pcl::PointXYZRGB>> binArray = assignBins(*cloud, viewDistance, numBins, numSegments);
-
-	size_t i = 0, j = 0;
-
-	// colour each segment differently
-	for (auto& segmentArray : *binArray)
+	// colour each point according to its segment
+	for(BinArray<pcl::PointXYZRGB>& binArray : *pSegmentArray)
 	{
-		float r = std::rand() % 256, g = std::rand() % 256, b = std::rand() % 256;
-		for(auto& pointArray : segmentArray)
+		for(PointArray<pcl::PointXYZRGB>& pointArray : binArray)
 		{
-			for (auto pPoint : pointArray)
+			float r = 50 + std::rand()%206;
+			float g = 50 + std::rand()%206;
+			float b = 50 + std::rand()%206;
+			for(const pcl::PointXYZRGB* pPoint : pointArray)
 			{
-				pPoint->r = r, pPoint->g = g, pPoint->b = b;							
-			}
-			j++;
-		}
-		i++;
-		j = 0;
-	}
-
-	for(size_t x = 0; x < binArray->size(); x++)
-	{
-		using namespace std;
-		cout << "Segment: " << x+1 << std::endl;
-		auto groundPlaneLines = getGroundPlaneLines((*binArray)[x]);
-		for(auto l : groundPlaneLines)
-		{
-			
+				pcl::PointXYZRGB* p = const_cast<pcl::PointXYZRGB*>(pPoint);
+				p->r = r;
+				p->g = g;
+				p->b = b;
+			}	
 		}
 	}
 
-	i = 0, j = 0;
+	// get cloud with ground removed
+	
+	auto cloud2 = groundRemoval(*pSegmentArray);
 
-	pcl::visualization::CloudViewer viewer("Cloud Viewer");
-	viewer.showCloud(cloud);
-	while(!viewer.wasStopped())
+	// visualize point clouds
+
+	pcl::visualization::CloudViewer viewer("Viewer");
+
+	viewer.showCloud(cloud1);
+	bool c1 = true;
+
+	while(!viewer.wasStopped()) 
 	{
-		/*pcl::PointCloud<pcl::PointXYZRGB>::Ptr fraction(new pcl::PointCloud<pcl::PointXYZRGB>);	
-
-		auto iterator = binAssignment->begin();
-
-		do
-		{
-			iterator = std::find_if(iterator, binAssignment->end(), [i,j](auto& assignment){ return assignment.first.first == i && assignment.first.second == j; });
-			if (iterator != binAssignment->end())
-			{
-				fraction->push_back(*(iterator->second));	
-				std::advance(iterator, 1);
-			}
-		} while(iterator != std::end(*binAssignment)); 
-		std::cout << "Fraction size: " << fraction->size() << std::endl;
-		j++;
-		if(j == numBins)
-		{
-			j = 0;
-			i++;
-		}
-		if(i == numSegments)
-			i = 0;
-
-
 		using namespace std::chrono_literals;
-		
-		if (fraction->size() != 0)	
-		{
-			std::this_thread::sleep_for(2000ms);
-			viewer.showCloud(fraction);
-		}*/
+		std::this_thread::sleep_for(3000ms);
+		//viewer.showCloud((c1 ? cloud2 : cloud1));
+		c1 = !c1;
 	}
-		
+
 	return 0;
 }
