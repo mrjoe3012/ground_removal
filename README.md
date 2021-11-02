@@ -13,9 +13,3 @@ then to build, run
 ```bash
 bash build.bash
 ```
-<br>
-Run the executable with<br><br>
-```bash
-bash run.bash
-```
-<br>
