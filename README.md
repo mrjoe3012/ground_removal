@@ -15,6 +15,8 @@ bash build.bash
 ```
 <br>
 Run the executable with
-```bash build/grt```
+```bash
+build/grt```
 or
-```bash bash run.bash```
+```bash
+bash run.bash```
