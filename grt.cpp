@@ -217,10 +217,10 @@ Vector2 prototypePoint(const PointArray<PointT>& pointArray)
 template<typename PointT>
 std::vector<Line> groundPlaneLinesForSegment(const BinArray<PointT>& binArray)
 {
-	const float tM = 2.0f, tMSmall = -3.0f;
+	const float tM = 1.0f, tMSmall = -1.0f;
 	const float tB = 1.0f;
-	const float tRMSE = 0.005f;
-	const float tDPrev = 1.0f;
+	const float tRMSE = 0.25f;
+	const float tDPrev = 0.5f;
 
 	// points which are incrementally populated and
 	// are ultimately used to fit ground plane lines
@@ -277,7 +277,7 @@ template<typename PointT>
 typename pcl::PointCloud<PointT>::Ptr groundRemoval(const SegmentArray<PointT>& segmentArray)
 {
 
-	const float tDGround = 0.175f;
+	const float tDGround = 2.0f;
 
 	float numberOfSegments = segmentArray.size();
 
@@ -321,7 +321,6 @@ typename pcl::PointCloud<PointT>::Ptr groundRemoval(const SegmentArray<PointT>& 
 int main()
 {
 
-	std::srand(std::time(0));
 
 	// get point cloud from .pcd file
 
@@ -333,7 +332,7 @@ int main()
 		return -1;
 	}
 
-	unsigned int numSegments = 6, numBins = 128;
+	unsigned int numSegments = 128, numBins = 256;
 
 	std::unique_ptr<SegmentArray<pcl::PointXYZRGB>> pSegmentArray = assignPointsToBinsAndSegments(*cloud1, numSegments, numBins);
 
@@ -341,11 +340,11 @@ int main()
 	// colour each point according to its segment
 	for(BinArray<pcl::PointXYZRGB>& binArray : *pSegmentArray)
 	{
+		float r = 50 + std::rand()%206;
+		float g = 50 + std::rand()%206;
+		float b = 50 + std::rand()%206;
 		for(PointArray<pcl::PointXYZRGB>& pointArray : binArray)
 		{
-			float r = 50 + std::rand()%206;
-			float g = 50 + std::rand()%206;
-			float b = 50 + std::rand()%206;
 			for(const pcl::PointXYZRGB* pPoint : pointArray)
 			{
 				pcl::PointXYZRGB* p = const_cast<pcl::PointXYZRGB*>(pPoint);
@@ -360,9 +359,10 @@ int main()
 	
 	auto cloud2 = groundRemoval(*pSegmentArray);
 
+	
 	// visualize point clouds
 
-	pcl::visualization::CloudViewer viewer("Viewer");
+	/*pcl::visualization::CloudViewer viewer("Viewer");
 
 	viewer.showCloud(cloud1);
 	bool c1 = true;
@@ -373,6 +373,55 @@ int main()
 		std::this_thread::sleep_for(3000ms);
 		//viewer.showCloud((c1 ? cloud2 : cloud1));
 		c1 = !c1;
+	}*/
+
+	pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Viewer"));
+	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGB> whiteHandler(cloud2, 255, 255, 255);
+
+	viewer->setBackgroundColor(0,0,0);
+	
+	viewer->addPointCloud<pcl::PointXYZRGB>(cloud1, whiteHandler, "cloud1");
+
+	for(unsigned int i = 0; i < numSegments; i++)
+	{
+		const float pi = 4*std::atan(1);
+		std::vector<Line> groundPlaneLines = groundPlaneLinesForSegment((*pSegmentArray)[i]);
+		float segmentLineAngle = ((2*pi)/numSegments)*i + ((2*pi)/numSegments)/2;
+		std::cout << "angle: " << segmentLineAngle << std::endl;
+		float lx = std::cos(segmentLineAngle);
+		float ly = std::sin(segmentLineAngle);
+		unsigned int j = 0;
+		for(const Line& l : groundPlaneLines)
+		{
+			pcl::PointXYZ begin(l.beginPoint.x*lx, l.beginPoint.x*ly, l.beginPoint.y);
+			pcl::PointXYZ end(l.endPoint.x*lx, l.endPoint.x*ly, l.endPoint.y);
+			viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(begin, end, "line_"+std::to_string(i)+"_"+std::to_string(j));
+			j++;
+		}	
+
+	}
+
+	viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "cloud1");
+	viewer->addCoordinateSystem(1.0);
+	viewer->initCameraParameters();
+
+	unsigned int j = 0;
+	bool pc1 = true;
+
+	while(!viewer->wasStopped())
+	{
+		using namespace std::chrono_literals;
+		viewer->spinOnce(100);
+		std::this_thread::sleep_for(100ms);
+		j++;
+		if(j == 10)
+		{
+			viewer->removePointCloud((pc1?"cloud1":"cloud2"));
+			viewer->addPointCloud((pc1?cloud1:cloud2), (pc1?"cloud2":"cloud1"));
+			viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, (pc1?"cloud2":"cloud1"));
+			pc1=!pc1;
+			j =  0;
+		}
 	}
 
 	return 0;
