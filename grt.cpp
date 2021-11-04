@@ -170,7 +170,10 @@ Line fitLine2D(const std::vector<Vector2>& points)
 	float slope = (sumXY - sumX*yMean) / (sumXX - sumX*xMean);
 	float yIntercept = yMean - slope*xMean;
 
-	return Line(slope, yIntercept, points.front(), points.back());
+	Vector2 startPoint(points.front().x, points.front().x*slope + yIntercept);
+	Vector2 endPoint(points.back().x, points.back().x*slope+yIntercept);
+
+	return Line(slope, yIntercept, startPoint, endPoint);
 }
 
 // returns the minimum distance between a (2d) point and a (2d) line.
@@ -385,7 +388,7 @@ int main()
 	{
 		using namespace std::chrono_literals;
 		std::this_thread::sleep_for(3000ms);
-		//viewer.showCloud((c1 ? cloud2 : cloud1));
+		viewer.showCloud((c1 ? cloud2 : cloud1));
 		c1 = !c1;
 	}*/
 
