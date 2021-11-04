@@ -217,9 +217,9 @@ Vector2 prototypePoint(const PointArray<PointT>& pointArray)
 template<typename PointT>
 std::vector<Line> groundPlaneLinesForSegment(const BinArray<PointT>& binArray)
 {
-	const float tM = 1.0f, tMSmall = -1.0f;
+	const float tM = 1.0f, tMSmall = 0;
 	const float tB = 1.0f;
-	const float tRMSE = 0.25f;
+	const float tRMSE = 0.05f;
 	const float tDPrev = 0.5f;
 
 	// points which are incrementally populated and
@@ -274,14 +274,14 @@ std::vector<Line> groundPlaneLinesForSegment(const BinArray<PointT>& binArray)
 // TODO create a structure for the parameter set and allow it to be customised
 // per-call, rather than hard-coded as constants.
 template<typename PointT>
-typename pcl::PointCloud<PointT>::Ptr groundRemoval(const SegmentArray<PointT>& segmentArray)
+PCPtr<PointT> groundRemoval(const SegmentArray<PointT>& segmentArray)
 {
 
-	const float tDGround = 2.0f;
+	const float tDGround = 0.1f;
 
 	float numberOfSegments = segmentArray.size();
 
-	typename pcl::PointCloud<PointT>::Ptr result(new pcl::PointCloud<PointT>);
+	PCPtr<PointT> result(new pcl::PointCloud<PointT>);
 
 	unsigned int segmentIndex = 0;
 
@@ -294,24 +294,37 @@ typename pcl::PointCloud<PointT>::Ptr groundRemoval(const SegmentArray<PointT>& 
 			{
 				Vector2 point2d = Vector2::fromPclPoint(*point);
 				bool groundPoint = false;
+
+				// find the closest line to the ground point
+				const Line* closestLine = nullptr;
+				float distanceToClosestLine = std::numeric_limits<float>::max();
 				for (const Line& line : groundPlaneLines)
 				{
-					float distanceToStart = (line.beginPoint - point2d).magnitude();
-					float distanceToEnd = (line.endPoint - point2d).magnitude();
-					if(distanceToStart <= tDGround || distanceToEnd <= tDGround)
+					float distanceToStart = (line.beginPoint - point2d).sqrMagnitude();
+					float distanceToEnd = (line.endPoint - point2d).sqrMagnitude();
+					if(distanceToEnd < distanceToClosestLine || distanceToStart < distanceToClosestLine)
 					{
-						groundPoint = true;
-						break;
+						closestLine = &line;
+						distanceToClosestLine = std::min(distanceToStart, distanceToEnd);
 					}
 				}
+
+				// check the point's minimum distance to the closest line against
+				// the ground point distance threshold to determine whether or not we should remove it
+				if(closestLine != nullptr)
+				{
+					float distanceToLine = distanceFromPointToLine(point2d, *closestLine);
+					if(distanceToLine <= tDGround)
+						groundPoint = true;
+				}
+
+				// add the point to the new cloud only if it isn't a ground point
 				if(!groundPoint)
 					result->push_back(*point);
 					
 			}
 		}
-
 		segmentIndex++;
-
 	}	
 
 	return result;
@@ -351,6 +364,7 @@ int main()
 				p->r = r;
 				p->g = g;
 				p->b = b;
+				p->r=p->g=p->b=255;
 			}	
 		}
 	}
@@ -395,7 +409,7 @@ int main()
 		{
 			pcl::PointXYZ begin(l.beginPoint.x*lx, l.beginPoint.x*ly, l.beginPoint.y);
 			pcl::PointXYZ end(l.endPoint.x*lx, l.endPoint.x*ly, l.endPoint.y);
-			viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(begin, end, "line_"+std::to_string(i)+"_"+std::to_string(j));
+			//viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(begin, end, "line_"+std::to_string(i)+"_"+std::to_string(j));
 			j++;
 		}	
 
