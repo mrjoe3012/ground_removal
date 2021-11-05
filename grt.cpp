@@ -1,3 +1,5 @@
+// OLD CODE FILE IGNORE
+
 #include <iostream>
 #include <cmath>
 #include <vector>
@@ -334,6 +336,13 @@ PCPtr<PointT> groundRemoval(const SegmentArray<PointT>& segmentArray)
 
 }
 
+void pointPickingCallback(const pcl::visualization::PointPickingEvent& event)
+{
+	float x,y,z;
+	event.getPoint(x,y,z);
+	std::cout << "Point picking event! (" << x << "," << y << "," << z << ")" << std::endl;
+}
+
 int main()
 {
 
@@ -375,25 +384,13 @@ int main()
 	// get cloud with ground removed
 	
 	auto cloud2 = groundRemoval(*pSegmentArray);
-
 	
 	// visualize point clouds
 
-	/*pcl::visualization::CloudViewer viewer("Viewer");
-
-	viewer.showCloud(cloud1);
-	bool c1 = true;
-
-	while(!viewer.wasStopped()) 
-	{
-		using namespace std::chrono_literals;
-		std::this_thread::sleep_for(3000ms);
-		viewer.showCloud((c1 ? cloud2 : cloud1));
-		c1 = !c1;
-	}*/
-
 	pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("Viewer"));
 	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGB> whiteHandler(cloud2, 255, 255, 255);
+
+	viewer->registerPointPickingCallback(pointPickingCallback);
 
 	viewer->setBackgroundColor(0,0,0);
 	
@@ -412,6 +409,7 @@ int main()
 		{
 			pcl::PointXYZ begin(l.beginPoint.x*lx, l.beginPoint.x*ly, l.beginPoint.y);
 			pcl::PointXYZ end(l.endPoint.x*lx, l.endPoint.x*ly, l.endPoint.y);
+			//uncomment the line below
 			//viewer->addLine<pcl::PointXYZ, pcl::PointXYZ>(begin, end, "line_"+std::to_string(i)+"_"+std::to_string(j));
 			j++;
 		}	
@@ -433,6 +431,7 @@ int main()
 		j++;
 		if(j == 10)
 		{
+			// switch the point cloud every 1 second
 			viewer->removePointCloud((pc1?"cloud1":"cloud2"));
 			viewer->addPointCloud((pc1?cloud1:cloud2), (pc1?"cloud2":"cloud1"));
 			viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, (pc1?"cloud2":"cloud1"));

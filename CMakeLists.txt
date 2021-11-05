@@ -8,5 +8,5 @@ include_directories(${PCL_INCLUDE_DIRS})
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 
-add_executable (grt grt.cpp)
-target_link_libraries (grt ${PCL_LIBRARIES})
+add_executable (vis visualize.cpp)
+target_link_libraries (vis ${PCL_LIBRARIES})
