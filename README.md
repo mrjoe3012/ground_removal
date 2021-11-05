@@ -1,4 +1,4 @@
-# How to Build
+## How to Build
 
 Make sure you have cmake and libpcl installed.
 
