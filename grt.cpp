@@ -222,8 +222,8 @@ std::vector<Line> groundPlaneLinesForSegment(const BinArray<PointT>& binArray)
 {
 	const float tM = 1.0f, tMSmall = 0;
 	const float tB = 1.0f;
-	const float tRMSE = 0.05f;
-	const float tDPrev = 0.5f;
+	const float tRMSE = 0.005f;
+	const float tDPrev = 0.1f;
 
 	// points which are incrementally populated and
 	// are ultimately used to fit ground plane lines
@@ -342,7 +342,7 @@ int main()
 
 	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud1(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-	if(pcl::io::loadPCDFile<pcl::PointXYZRGB>("sample_data/cloud1.pcd", *cloud1) == -1)
+	if(pcl::io::loadPCDFile<pcl::PointXYZRGB>("sample_data/cloud8.pcd", *cloud1) == -1)
 	{
 		PCL_ERROR("Couldn't read sample data.");
 		return -1;
