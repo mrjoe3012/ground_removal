@@ -21,8 +21,10 @@ namespace ground_removal
 
 	// start of vector definitions
 
-	struct Vector2
+	class Vector2
 	{
+		public:
+
 		Vector2() : Vector2(0,0) {};
 		Vector2(float x, float y) : x(x),y(y) {};
 		Vector2(const Vector2& rhs) : x(rhs.x),y(rhs.y) {};
@@ -90,6 +92,22 @@ namespace ground_removal
 
 	// end of line definitions
 
+	// start of algorithm parameters 
+
+	// Parameters used in the ground removal algorithm.
+	// tM: The maximum gradient a ground plane line can have.
+	// tMSmall: The gradient threshold for a 'small' gradient.
+	// tB: The maximum y intercept allowed for a line with a 'small' gradient.
+	// tDPrev: The maximum distance between the first point of a ground line and
+	// the previous ground line.
+	// tRMSE: The maximum allowed Root Mean Square Error for a line of best fit.
+	struct AlgorithmParameters
+	{
+		float tM, tMSmall, tB, tRMSE, tDPrev, tDGround;
+	};
+
+	// end of algorithm parameters
+
 	// typedefs
 
 	// represents an array of pcl::Pointx pointers, used to represents points within a bin (within a segment)
@@ -109,6 +127,22 @@ namespace ground_removal
 	using PCPtr = typename pcl::PointCloud<PointT>::Ptr;
 
 	// end of typedefs
+
+	// constants
+	
+	const AlgorithmParameters DEFAULT_ALGORITHM_PARAMETERS = 
+	{
+		.tM = 1.0f,
+		.tMSmall = 1.0f,
+		.tB = 5.0f,
+		.tRMSE = 0.005f,
+		.tDPrev = 0.25f,
+		.tDGround = 0.1f, 
+	};	
+
+	// end of constants
+
+	// ALGORITHM IMPLEMENTATION:
 
 	// Currently always divides an FOV of 360degrees. This means that FOVs which are not 360degrees or 180degrees will have
 	// uneven segment assignments. Although given the use-case for the algorithm, it's unlikely that we would ever work with
@@ -223,12 +257,12 @@ namespace ground_removal
 	// returns a series of ground plane line approximations for a specific segment
 	// (algorithm 1 in "Fast Segmentation of 3D Point Clouds for Gound Vehicles" pg.562)
 	template<typename PointT>
-	std::vector<Line> groundPlaneLinesForSegment(const BinArray<PointT>& binArray)
+	std::vector<Line> groundPlaneLinesForSegment(const BinArray<PointT>& binArray, const AlgorithmParameters& params = DEFAULT_ALGORITHM_PARAMETERS)
 	{
-		const float tM = 1.0f, tMSmall = 0;
-		const float tB = 1.0f;
-		const float tRMSE = 0.005f;
-		const float tDPrev = 0.1f;
+		float tM = params.tM, tMSmall = params.tMSmall;
+		float tB = params.tB;
+		float tRMSE = params.tRMSE;
+		float tDPrev = params.tDPrev;
 
 		// points which are incrementally populated and
 		// are ultimately used to fit ground plane lines
@@ -249,7 +283,6 @@ namespace ground_removal
 				{
 					linePoints.push_back(prototype);
 					Line line = fitLine2D(linePoints);
-					std::cout << line.gradient << ", " << line.yIntercept << ", " <<  fitRMSE(line, linePoints) << std::endl;
 					if(!(std::abs(line.gradient) <= tM && (line.gradient > tMSmall || std::abs(line.yIntercept) <= tB) && fitRMSE(line, linePoints) <= tRMSE))
 					{
 						linePoints.pop_back();
@@ -272,20 +305,14 @@ namespace ground_removal
 
 		}
 
-		std::cout << lines.size() << " ground plane lines" << std::endl;
-
 		return lines;
 
 	}
 
-	// returns a new point cloud with (hopefully) less ground points
-	// TODO create a structure for the parameter set and allow it to be customised
-	// per-call, rather than hard-coded as constants.
 	template<typename PointT>
-	PCPtr<PointT> groundRemoval(const SegmentArray<PointT>& segmentArray)
+	PCPtr<PointT> groundRemoval(const SegmentArray<PointT>& segmentArray, const AlgorithmParameters& params = DEFAULT_ALGORITHM_PARAMETERS)
 	{
-
-		const float tDGround = 0.1f;
+		float tDGround = params.tDGround;
 
 		float numberOfSegments = segmentArray.size();
 
@@ -295,7 +322,7 @@ namespace ground_removal
 
 		for(const BinArray<PointT>& binArray : segmentArray)
 		{
-			std::vector<Line> groundPlaneLines = groundPlaneLinesForSegment(binArray);
+			std::vector<Line> groundPlaneLines = groundPlaneLinesForSegment(binArray, params);
 			for(const PointArray<PointT>& pointArray : binArray)
 			{
 				for(const PointT* point : pointArray)
