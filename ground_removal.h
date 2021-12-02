@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <thread>
+#include <cassert>
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_cloud.h>
@@ -153,6 +154,9 @@ namespace ground_removal
 	template<typename PointT>
 	std::unique_ptr< SegmentArray< PointT > > assignPointsToBinsAndSegments(const pcl::PointCloud<PointT>& cloud, int numberOfSegments, int numberOfBins)
 	{
+		assert(numberOfSegments > 0);
+		assert(numberOfBins > 0);
+
 		const float pi = 4*std::atan(1);
 
 		// construct the result so that it already contains the correct number of arrays for segments and bins
@@ -178,7 +182,7 @@ namespace ground_removal
 				pointAngleWithXAxis = 2.0f*pi + pointAngleWithXAxis;
 
 			
-			unsigned int segmentIndex = static_cast<unsigned int>(pointAngleWithXAxis/segmentAngle);
+			unsigned int segmentIndex = std::min(static_cast<unsigned int>(pointAngleWithXAxis/segmentAngle), static_cast<unsigned int>(numberOfBins-1));
 			unsigned int binIndex = std::min(static_cast<unsigned int>(pointDistance/binRange), static_cast<unsigned int>(numberOfBins-1));
 
 			// assign the bin according to its index
