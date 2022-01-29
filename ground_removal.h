@@ -1,5 +1,3 @@
-// TODO Remove stdout prints.
-
 #include <iostream>
 #include <cmath>
 #include <vector>
