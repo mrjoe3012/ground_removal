@@ -136,7 +136,7 @@ namespace ground_removal
 		.tB = 0.25f,
 		.tRMSE = 0.02f,
 		.tDPrev = 0.25f,
-		.tDGround = 0.06f, 
+		.tDGround = 0.1f, 
 	};	
 
 	// end of constants
