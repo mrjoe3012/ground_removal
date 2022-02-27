@@ -311,8 +311,20 @@ namespace ground_removal
 
 	}
 
+	// performs ground removal and returns the filtered point cloud
 	template<typename PointT>
 	PCPtr<PointT> groundRemoval(const SegmentArray<PointT>& segmentArray, const AlgorithmParameters& params = DEFAULT_ALGORITHM_PARAMETERS)
+	{
+		// store the removed points, but don't actually do anything with them
+		PCPtr<PointT> pRemovedPoints = PCPtr<PointT>(new pcl::PointCloud<PointT>());
+		PCPtr<PointT> result = groundRemovalRecovered(segmentArray, *pRemovedPoints, params);
+		return result;		
+	}
+
+	// performs ground removal, returns the filtered point cloud and
+	// places all removed points in a seperate point cloud 
+	template<typename PointT>
+	PCPtr<PointT> groundRemovalRecovered(const SegmentArray<PointT>& segmentArray, pcl::PointCloud<PointT>& removedPoints, const AlgorithmParameters& params = DEFAULT_ALGORITHM_PARAMETERS)
 	{
 		float tDGround = params.tDGround;
 
@@ -358,6 +370,8 @@ namespace ground_removal
 					// add the point to the new cloud only if it isn't a ground point
 					if(!groundPoint)
 						result->push_back(*point);
+					else
+						removedPoints.push_back(*point);
 						
 				}
 			}
