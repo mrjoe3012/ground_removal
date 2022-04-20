@@ -13,6 +13,8 @@
 #include <pcl/visualization/cloud_viewer.h>
 #include <pcl/visualization/pcl_visualizer.h>
 
+
+
 namespace ground_removal
 {
 
@@ -38,7 +40,7 @@ namespace ground_removal
 		// convert a 3d point to a 2d point based on its distance
 		// from the centre of the 3d space and its height
 		template<typename PointT>
-		static Vector2 fromPclPoint(const PointT& p) { return Vector2(std::sqrt(std::pow(p.x,2) + std::pow(p.y,2)), p.z); };
+		static Vector2 fromPclPoint(const PointT& p) { return Vector2(std::sqrt(std::pow(p.x,2) + std::pow(p.y,2)), p.z); }
 
 		float sqrMagnitude() const { return std::pow(x,2) + std::pow(y,2); };
 		float magnitude() const { return std::sqrt(sqrMagnitude()); };
@@ -131,12 +133,12 @@ namespace ground_removal
 	
 	const AlgorithmParameters DEFAULT_ALGORITHM_PARAMETERS = 
 	{
-		.tM = 0.1f,
-		.tMSmall = 0.125f,
-		.tB = 0.25f,
-		.tRMSE = 0.02f,
-		.tDPrev = 0.25f,
-		.tDGround = 0.1f, 
+		.tM = 0.18f,
+		.tMSmall = 0.25f,
+		.tB = 0.1f,
+		.tRMSE = 0.028f,
+		.tDPrev = 0.14f,
+		.tDGround = 0.01f, 
 	};	
 
 	// end of constants
@@ -211,8 +213,13 @@ namespace ground_removal
 		float slope = (sumXY - sumX*yMean) / (sumXX - sumX*xMean);
 		float yIntercept = yMean - slope*xMean;
 
-		Vector2 startPoint(points.front().x, points.front().x*slope + yIntercept);
-		Vector2 endPoint(points.back().x, points.back().x*slope+yIntercept);
+		// figure out which points are furthest back/front
+		// by their x components
+		Vector2 frontPoint = *std::min_element(points.begin(), points.end(), [](const Vector2& a, const Vector2& b){ return a.x < b.x; });
+		Vector2 backPoint = *std::max_element(points.begin(), points.end(), [](const Vector2& a, const Vector2& b){ return a.x < b.x; });
+
+		Vector2 startPoint(frontPoint.x, frontPoint.x*slope + yIntercept);
+		Vector2 endPoint(backPoint.x, backPoint.x*slope+yIntercept);
 
 		return Line(slope, yIntercept, startPoint, endPoint);
 	}
@@ -383,3 +390,4 @@ namespace ground_removal
 	}
 
 }
+
